@@ -1,0 +1,37 @@
+cabal-version: 3.0
+name: bpd
+version: 0.1.0.0
+synopsis: Server-rendered desk for resolving missing product barcodes
+license: BSD-3-Clause
+license-file: LICENSE
+build-type: Simple
+
+common defaults
+  default-language: Haskell2010
+  ghc-options: -Wall -Wcompat
+
+library
+  import: defaults
+  hs-source-dirs: src
+  exposed-modules: BPD.Config, BPD.Core, BPD.Broker, BPD.Web
+  build-depends:
+    base >=4.16 && <5, aeson, amqp >=0.24, async, bytestring,
+    cookie, http-client, http-client-tls, http-types, lucid,
+    scotty >=0.22, text, time, uuid, wai, warp
+
+executable bpd
+  import: defaults
+  hs-source-dirs: app
+  main-is: Main.hs
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends: base, bpd, async, unix, warp
+
+test-suite bpd-test
+  import: defaults
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: Spec.hs
+  ghc-options: -threaded
+  build-depends:
+    base, bpd, aeson, async, bytestring, hspec, http-types,
+    text, time, wai, wai-extra

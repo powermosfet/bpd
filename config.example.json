@@ -1,0 +1,13 @@
+{
+  "listenAddress": "127.0.0.1",
+  "listenPort": 8080,
+  "productUrl": "http://mook.local:8003/api/product",
+  "claimTimeoutSeconds": 900,
+  "rabbitmq": {
+    "host": "localhost",
+    "port": 5672,
+    "vhost": "/",
+    "username": "bpd",
+    "queue": "missing-barcodes"
+  }
+}
