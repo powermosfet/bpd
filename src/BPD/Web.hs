@@ -62,6 +62,11 @@ webApp config desk = do
       token <- S.pathParam "id"
       S.liftIO $ returnBarcode desk token
       redirectTo "/"
+    S.post "/claim/:id/drop" $ do
+      checkCsrf csrf
+      token <- S.pathParam "id"
+      S.liftIO $ dropBarcode desk token
+      redirectTo "/"
     S.notFound $ S.status status404 >> render csrf (page $ p_ "Page not found.")
 
 claimUrl :: Text -> Text
@@ -145,4 +150,8 @@ edit _config csrf c = page $ do
   form_ [method_ "post", action_ $ claimUrl (claimId c) <> "/return"] $ do
     hiddenCsrf csrf
     button_ [type_ "submit", class_ "secondary"] "Return to queue"
+  form_ [method_ "post", action_ $ claimUrl (claimId c) <> "/drop"] $ do
+    hiddenCsrf csrf
+    p_ [class_ "muted"] "If this barcode cannot be identified, drop it from the queue without saving a product."
+    button_ [type_ "submit", class_ "secondary"] "Drop barcode"
   a_ [href_ "/"] "Back to queue"

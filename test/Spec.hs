@@ -130,6 +130,36 @@ main = hspec $ do
       returnBarcode d token
       readIORef (pending f) `shouldReturn` ["001"]
       readIORef (acknowledgements f) `shouldReturn` 0
+    it "drops unknown and invalid barcodes without posting or requeueing" $ do
+      mapM_ (\payload -> do
+        (f, d) <- setup [payload, "002"] 900
+        token <- claim d
+        dropBarcode d token
+        dropBarcode d token
+        readIORef (pending f) `shouldReturn` ["002"]
+        readIORef (posted f) `shouldReturn` []
+        readIORef (acknowledgements f) `shouldReturn` 1
+        activeClaim <$> snapshot d `shouldReturn` Nothing
+        next <- claim d
+        dropBarcode d token
+        claimId . maybe (error "missing claim") id . activeClaim <$> snapshot d `shouldReturn` next
+        readIORef (acknowledgements f) `shouldReturn` 1) ["001", "\xff"]
+    it "reports uncertain drops and invalidates the claim" $ do
+      (f, d) <- setup ["001"] 900
+      token <- claim d
+      writeIORef (failAck f) True
+      dropBarcode d token
+      v <- snapshot d
+      activeClaim v `shouldBe` Nothing
+      notice v `shouldSatisfy` maybe False (T.isInfixOf "Could not confirm dropping")
+      readIORef (connected f) `shouldReturn` False
+      readIORef (posted f) `shouldReturn` []
+    it "does not drop expired claims" $ do
+      (f, d) <- setup ["001"] 0
+      token <- claim d
+      dropBarcode d token
+      readIORef (pending f) `shouldReturn` ["001"]
+      readIORef (acknowledgements f) `shouldReturn` 0
     it "rejects a stale form after a new claim" $ do
       (f, d) <- setup ["001", "002"] 900
       old <- claim d

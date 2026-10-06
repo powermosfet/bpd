@@ -9,6 +9,8 @@ Products are saved through your existing REST service; BPD has no database.
 Open BPD to see **Ready in queue**, then click **Fetch barcode**, enter the
 product description, and click **Save product**. The home page offers **Resume**
 while a barcode is being edited. **Return to queue** releases it without saving.
+**Drop barcode** removes an unidentifiable barcode from the queue without saving
+a product. Invalid messages can also be dropped.
 Refreshing a page updates the counter; it excludes the barcode being edited.
 One active claim is shared by all browser tabs in this single-operator service.
 

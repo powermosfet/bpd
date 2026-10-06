@@ -93,6 +93,16 @@ assert browser.get(BASE + location, timeout=10).status_code == 410
 assert save(location, csrf).status_code == 303
 assert len(posts()) == 1  # Double submission never writes again.
 assert count() == 0
+# Dropping unknown codes removes deliveries without writing products.
+publish("unknown")
+location, csrf = claim()
+previous = len(posts())
+assert "Drop barcode" in browser.get(BASE + location, timeout=10).text
+assert browser.post(BASE + location + "/drop", timeout=10).status_code == 403
+r = browser.post(BASE + location + "/drop", data={"csrf": csrf}, allow_redirects=False, timeout=10)
+assert r.status_code == 303 and r.headers["Location"] == "/"
+assert browser.get(BASE + location, timeout=10).status_code == 410
+assert count() == 0 and len(posts()) == previous
 # Non-2xx responses preserve the claim and escaped input, with no automatic retry.
 mode("error")
 publish("9999")
@@ -156,6 +166,10 @@ page = browser.get(BASE + location, timeout=10).text
 assert "not UTF-8" in page and "Save product" not in page
 release(location, csrf)
 assert count() == 1
+location, csrf = claim()
+previous = len(posts())
+assert browser.post(BASE + location + "/drop", data={"csrf": csrf}, allow_redirects=False, timeout=10).status_code == 303
+assert count() == 0 and len(posts()) == previous
 # Secrets are delivered to the dynamic user rather than embedded in ExecStart.
 unit = subprocess.check_output(["systemctl", "cat", "bpd"], text=True)
 assert "LoadCredential=" in unit and "test-password" not in unit

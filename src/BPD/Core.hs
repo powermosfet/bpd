@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module BPD.Core
   ( Delivery(..), Session(..), Backend(..), Desk, View(..), ClaimView(..)
-  , newDesk, tick, snapshot, fetchBarcode, saveDescription, returnBarcode
+  , newDesk, tick, snapshot, fetchBarcode, saveDescription, returnBarcode, dropBarcode
   , closeDesk, decodeBarcode, validateDescription, trySync, bounded
   ) where
 
@@ -183,6 +183,18 @@ returnBarcode (Desk _ _ lock) token = modifyState_ lock $ \s0 -> do
       case result of
         Right () -> pure s { current = Nothing, message = Just "Barcode returned to the queue." }
         Left _ -> disconnect s "Could not confirm return to the queue. The barcode may be redelivered."
+    _ -> pure s { message = Just "This form is stale or its claim has expired." }
+
+-- Deliberately discard a delivery without creating a product.
+dropBarcode :: Desk -> Text -> IO ()
+dropBarcode (Desk _ _ lock) token = modifyState_ lock $ \s0 -> do
+  s <- normalize s0
+  case current s of
+    Just c | claimId (claimView c) == token -> do
+      result <- trySync $ bounded $ acknowledge (claimDelivery c)
+      case result of
+        Right () -> pure s { current = Nothing, message = Just "Barcode dropped without saving a product." }
+        Left _ -> disconnect s "Could not confirm dropping the barcode. The barcode may be redelivered."
     _ -> pure s { message = Just "This form is stale or its claim has expired." }
 
 closeDesk :: Desk -> IO ()
