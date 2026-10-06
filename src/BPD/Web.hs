@@ -13,6 +13,7 @@ import Data.Time (defaultTimeLocale, formatTime)
 import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID
 import Lucid
+import Network.HTTP.Types.URI (urlEncode)
 import Network.HTTP.Types.Status
 import Network.Wai (Application)
 import qualified Web.Scotty as S
@@ -136,7 +137,14 @@ edit :: Config -> Text -> ClaimView -> Html ()
 edit _config csrf c = page $ do
   h2_ "Describe this product"
   case barcode c of
-    Right code -> p_ [class_ "barcode"] $ toHtml code
+    Right code -> do
+      p_ [class_ "barcode"] $ toHtml code
+      let query = TE.decodeUtf8 $ urlEncode False $ TE.encodeUtf8 code
+      p_ $ do
+        "Search barcode: "
+        a_ [href_ $ "https://duckduckgo.com/?q=" <> query, target_ "_blank", rel_ "noopener noreferrer"] "DuckDuckGo"
+        " · "
+        a_ [href_ $ "https://www.google.com/search?q=" <> query, target_ "_blank", rel_ "noopener noreferrer"] "Google"
     Left _ -> p_ "This message does not contain a valid barcode."
   p_ [class_ "muted"] $ toHtml $ "Claim expires at " <> T.pack (formatTime defaultTimeLocale "%Y-%m-%d %H:%M:%S UTC" $ expiresAt c) <> "."
   maybe (pure ()) (p_ [class_ "notice", role_ "alert"] . toHtml) (claimError c)
