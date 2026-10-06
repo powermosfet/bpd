@@ -6,7 +6,7 @@ let
   runtimeConfig = pkgs.writeText "bpd-config.json" (builtins.toJSON {
     inherit (cfg) listenAddress listenPort productUrl claimTimeoutSeconds;
     rabbitmq = {
-      inherit (cfg.rabbitmq) host port vhost username queue;
+      inherit (cfg.rabbitmq) host port vhost username queue shoppingListQueue;
     };
   });
 in {
@@ -40,6 +40,7 @@ in {
       vhost = mkOption { type = types.str; default = "/"; description = "RabbitMQ virtual host."; };
       username = mkOption { type = types.str; default = "bpd"; description = "RabbitMQ username."; };
       queue = mkOption { type = types.str; default = "missing-barcodes"; description = "Existing queue of missing barcodes."; };
+      shoppingListQueue = mkOption { type = types.str; default = "shopping-list"; description = "Existing queue receiving barcode and description JSON when Add to shopping list is checked."; };
       passwordFile = mkOption {
         type = types.str;
         description = "Absolute runtime path to the RabbitMQ password file. Do not use a Nix path literal or put the secret in the Nix store.";

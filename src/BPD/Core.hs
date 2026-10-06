@@ -25,7 +25,8 @@ data Delivery = Delivery
   { deliveryBody :: BS.ByteString, acknowledge :: IO (), requeue :: IO () }
 data Session = Session
   { sessionAlive :: IO Bool, readyCount :: IO Int
-  , getDelivery :: IO (Maybe Delivery), closeSession :: IO () }
+  , getDelivery :: IO (Maybe Delivery), closeSession :: IO ()
+  , publishShopping :: Text -> Text -> IO () }
 data Backend = Backend
   { connect :: IO Session, postProduct :: Text -> Text -> IO (Either Text ()) }
 data Claim = Claim
@@ -33,6 +34,7 @@ data Claim = Claim
 data ClaimView = ClaimView
   { claimId :: Text, barcode :: Either Text Text, description :: Text
   , expiresAt :: UTCTime, claimError :: Maybe Text
+  , addToShoppingList :: Bool, productSaved :: Bool
   } deriving (Eq, Show)
 data View = View
   { queueCount :: Maybe Int, activeClaim :: Maybe ClaimView, notice :: Maybe Text
@@ -148,31 +150,41 @@ fetchBarcode (Desk _ ttl lock) = modifyState lock $ \s0 -> do
             token <- UUID.toText <$> UUID.nextRandom
             now <- getCurrentTime
             let decoded = decodeBarcode (deliveryBody delivery)
-                v = ClaimView token decoded "" (addUTCTime (fromIntegral ttl) now) (either Just (const Nothing) decoded)
+                v = ClaimView token decoded "" (addUTCTime (fromIntegral ttl) now) (either Just (const Nothing) decoded) True False
             pure (s { current = Just (Claim v delivery), message = Nothing }, Just token)
 
-saveDescription :: Desk -> Text -> Text -> IO ()
-saveDescription (Desk backend _ lock) token input = modifyState_ lock $ \s0 -> do
+saveDescription :: Desk -> Text -> Text -> Bool -> IO ()
+saveDescription (Desk backend _ lock) token input shopping = modifyState_ lock $ \s0 -> do
   s <- normalize s0
   case current s of
     Just c | claimId (claimView c) == token -> case (barcode $ claimView c, validateDescription input) of
       (Left err, _) -> pure $ failedForm s c input err
       (_, Left err) -> pure $ failedForm s c input err
+      (Right _, Right desc) | productSaved (claimView c) && desc /= description (claimView c) ->
+        pure $ failedForm s c (description $ claimView c) "This product is already saved. Retry with its saved description to finish adding it to the shopping list."
       (Right code, Right desc) -> do
-        result <- trySync $ postProduct backend code desc
+        result <- if productSaved (claimView c) then pure (Right (Right ()))
+          else trySync $ postProduct backend code desc
         case result of
           Left _ -> pure $ failedForm s c input "The save response was lost or timed out. The product may have been saved; retrying may produce a duplicate error."
           Right (Left err) -> pure $ failedForm s c input err
           Right (Right ()) -> do
-            ack <- trySync $ bounded $ do
-              alive <- maybe (pure False) sessionAlive (connection s)
-              if alive then acknowledge (claimDelivery c)
-                else ioError $ userError "Connection lost before acknowledgement."
-            case ack of
-              Right () -> pure s { current = Nothing, message = Just "Product saved." }
-              Left _ -> disconnect s "The product was saved, but queue acknowledgement is uncertain. The barcode may be redelivered."
+            let saved = c { claimView = (claimView c) { description = desc, productSaved = True, addToShoppingList = shopping } }
+            published <- trySync $ bounded $ if shopping
+              then maybe (ioError $ userError "RabbitMQ unavailable.") (\session -> publishShopping session code desc) (connection s)
+              else pure ()
+            case published of
+              Left _ -> pure $ failedForm s saved desc "Product saved, but adding it to the shopping list could not be confirmed. Retry to finish without saving the product again; the shopping list may receive a duplicate."
+              Right () -> do
+                ack <- trySync $ bounded $ do
+                  alive <- maybe (pure False) sessionAlive (connection s)
+                  if alive then acknowledge (claimDelivery c)
+                    else ioError $ userError "Connection lost before acknowledgement."
+                case ack of
+                  Right () -> pure s { current = Nothing, message = Just $ if shopping then "Product saved and added to shopping list." else "Product saved." }
+                  Left _ -> disconnect s "The product was saved, but queue acknowledgement is uncertain. The barcode may be redelivered."
     _ -> pure s { message = Just "This form is stale or its claim has expired. Fetch or resume a barcode from the home page." }
-  where failedForm s c desc err = s { current = Just c { claimView = (claimView c) { description = desc, claimError = Just err } } }
+  where failedForm s c desc err = s { current = Just c { claimView = (claimView c) { description = if productSaved (claimView c) then description (claimView c) else desc, claimError = Just err, addToShoppingList = shopping } } }
 
 returnBarcode :: Desk -> Text -> IO ()
 returnBarcode (Desk _ _ lock) token = modifyState_ lock $ \s0 -> do

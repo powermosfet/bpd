@@ -3,7 +3,7 @@ module BPD.Broker (makeBackend) where
 
 import BPD.Config
 import BPD.Core
-import Control.Exception (bracketOnError)
+import Control.Exception (bracket, bracketOnError)
 import Control.Monad (void)
 import Data.Aeson (encode, object, (.=))
 import qualified Data.ByteString.Lazy as BL
@@ -71,4 +71,22 @@ makeBackend config password = do
             }) $ getMsg deliveryChannel Ack (rabbitQueue r)
       pure Session
         { sessionAlive = readIORef alive, readyCount = count
-        , getDelivery = fetch, closeSession = closeConnection conn }
+        , getDelivery = fetch, closeSession = closeConnection conn
+        , publishShopping = \code desc -> bracket (openChannel conn) closeChannel $ \channel -> do
+            -- A separate channel leaves the active claim usable if the target
+            -- queue is missing or publishing permissions are denied.
+            void $ declareQueue channel newQueue { queueName = shoppingListQueue r, queuePassive = True }
+            returned <- newIORef False
+            addReturnListener channel (\_ -> writeIORef returned True)
+            confirmSelect channel False
+            void $ publishMsg' channel "" (shoppingListQueue r) True newMsg
+              { msgBody = encode $ object ["barcode" .= code, "description" .= desc]
+              , msgContentType = Just "application/json"
+              , msgDeliveryMode = Just Persistent
+              }
+            confirmation <- waitForConfirms channel
+            wasReturned <- readIORef returned
+            case confirmation of
+              Complete (_, nacks) | nacks == mempty && not wasReturned -> pure ()
+              _ -> ioError $ userError "Shopping-list message was not confirmed."
+        }

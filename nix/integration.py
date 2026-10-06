@@ -1,5 +1,6 @@
 """Exercise real HTTP forms, RabbitMQ deliveries and systemd credentials."""
 import re
+import json
 import subprocess
 import time
 
@@ -9,6 +10,7 @@ import requests
 BASE = "http://127.0.0.1:8080"
 REST = "http://127.0.0.1:8003"
 QUEUE = "missing-barcodes"
+SHOPPING_QUEUE = "test-shopping-list"
 params = pika.ConnectionParameters(
     "127.0.0.1", credentials=pika.PlainCredentials("bpd", "test-password")
 )
@@ -65,8 +67,15 @@ def claim():
     return location, csrf
 
 
-def save(location, csrf, description="Milk"):
-    return browser.post(BASE + location + "/save", data={"csrf": csrf, "description": description}, allow_redirects=False, timeout=20)
+def save(location, csrf, description="Milk", shopping=True):
+    data = {"csrf": csrf, "description": description}
+    if shopping:
+        data["addToShoppingList"] = "on"
+    return browser.post(BASE + location + "/save", data=data, allow_redirects=False, timeout=20)
+
+
+def shopping_message():
+    return broker(lambda ch: ch.basic_get(queue=SHOPPING_QUEUE, auto_ack=True))
 
 
 def release(location, csrf):
@@ -75,6 +84,7 @@ def release(location, csrf):
 
 
 broker(lambda ch: ch.queue_declare(queue=QUEUE, durable=True))
+broker(lambda ch: ch.queue_declare(queue=SHOPPING_QUEUE, durable=True))
 wait_until(lambda: requests.get(BASE + "/readyz", timeout=10).status_code == 200)
 assert requests.get(BASE + "/healthz", timeout=5).status_code == 200
 assert requests.post(BASE + "/claim", timeout=5).status_code == 403
@@ -89,10 +99,36 @@ assert "000786534249" in browser.get(BASE + location, timeout=10).text
 assert count() == 0  # The sole barcode is unacknowledged, not ready.
 assert save(location, csrf, "Café milk").status_code == 303
 assert posts()[-1] == {"barcode": "000786534249", "description": "Café milk"}
+method, properties, payload = shopping_message()
+assert method is not None
+assert properties.content_type == "application/json" and properties.delivery_mode == 2
+assert json.loads(payload) == {"barcode": "000786534249", "description": "Café milk"}
 assert browser.get(BASE + location, timeout=10).status_code == 410
 assert save(location, csrf).status_code == 303
 assert len(posts()) == 1  # Double submission never writes again.
 assert count() == 0
+# Unchecking the form still saves the backend product, without publishing.
+publish("0000000")
+location, csrf = claim()
+page = browser.get(BASE + location, timeout=10).text
+assert 'name="addToShoppingList" value="on" checked' in page
+assert save(location, csrf, "Apples", shopping=False).headers["Location"] == "/"
+assert posts()[-1] == {"barcode": "0000000", "description": "Apples"}
+assert shopping_message()[0] is None
+# A missing shopping queue keeps the claim and retries only publication.
+broker(lambda ch: ch.queue_delete(queue=SHOPPING_QUEUE))
+publish("0000001")
+location, csrf = claim()
+previous = len(posts())
+assert save(location, csrf, "  Pears  ").headers["Location"] == location
+assert len(posts()) == previous + 1
+page = browser.get(BASE + location, timeout=10).text
+assert "Product saved, but adding it to the shopping list" in page
+assert "readonly" in page
+broker(lambda ch: ch.queue_declare(queue=SHOPPING_QUEUE, durable=True))
+assert save(location, csrf, "Pears").headers["Location"] == "/"
+assert len(posts()) == previous + 1
+assert json.loads(shopping_message()[2]) == {"barcode": "0000001", "description": "Pears"}
 # Dropping unknown codes removes deliveries without writing products.
 publish("unknown")
 location, csrf = claim()
@@ -111,6 +147,7 @@ r = save(location, csrf, "<script>milk</script>")
 assert r.status_code == 303 and r.headers["Location"] == location
 page = browser.get(BASE + location, timeout=10)
 assert "HTTP 500" in page.text and "&lt;script&gt;milk&lt;/script&gt;" in page.text
+assert shopping_message()[0] is None
 release(location, csrf)
 assert count() == 1
 # Background expiry returns abandoned work; old forms cannot post it.

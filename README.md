@@ -14,6 +14,11 @@ a product. Invalid messages can also be dropped.
 Refreshing a page updates the counter; it excludes the barcode being edited.
 One active claim is shared by all browser tabs in this single-operator service.
 
+**Add to shopping list** is checked by default. After saving the product, BPD
+publishes a JSON object such as `{"barcode":"0000000","description":"Apples"}`
+to the configured RabbitMQ shopping-list queue. Uncheck it to save only the
+product. The choice is retained when a save fails.
+
 The queue must already exist. Messages are raw UTF-8 strings such as `786534249`
 or `00012345`, without JSON quoting or trailing newlines. Leading zeros are
 preserved. Empty, invalid UTF-8, quoted, whitespace-containing, or oversized
@@ -57,11 +62,17 @@ access-controlled proxy. RabbitMQ uses AMQP on port 5672 by default, and the
 product URL defaults to `http://mook.local:8003/api/product`. The runtime user
 must be able to resolve that hostname.
 
-RabbitMQ settings include `host`, `port`, `vhost`, `username`, and `queue`.
-The queue defaults to `missing-barcodes`. BPD uses passive queue declarations
+RabbitMQ settings include `host`, `port`, `vhost`, `username`, `queue`, and
+`shoppingListQueue`. The queues default to `missing-barcodes` and `shopping-list`
+respectively, and must have different names. Both queues must already exist.
+BPD uses passive queue declarations
 and reads/acknowledges messages; give its user RabbitMQ permissions sufficient
 to inspect and consume that queue. It never creates queues, exchanges, or
-bindings. The counter uses AMQP, so the RabbitMQ management plugin is unnecessary.
+bindings. Its user also needs permission to inspect the shopping-list queue and
+publish to the default exchange. Shopping-list messages use persistent delivery
+and `application/json` content type; BPD waits for publisher confirmation before
+acknowledging the original barcode. The counter uses AMQP, so the RabbitMQ
+management plugin is unnecessary.
 For a personal-network deployment the RabbitMQ connection is plain AMQP;
 AMQPS support is not included in this version.
 
@@ -91,6 +102,7 @@ Add BPD as a flake input and import its module:
               vhost = "/";
               username = "bpd";
               queue = "missing-barcodes";
+              shoppingListQueue = "shopping-list";
               passwordFile = "/run/secrets/bpd-rabbitmq";
             };
           };
@@ -129,11 +141,22 @@ pending. It never treats `500` or a future `409` as success automatically and
 never retries product POSTs automatically. A lookup endpoint or idempotent save
 contract will be needed to resolve uncertain saves automatically.
 
-Queue durability, persistent publishing, broker acknowledgement timeouts, and
+If the product save succeeds but shopping-list publishing fails, the active
+form retains the saved description and offers a retry that skips the product
+POST. The saved description is read-only during this retry. Unchecking the
+checkbox completes the save without adding it to the shopping list. This
+progress is kept in memory only, until expiry, return, disconnect, or restart.
+The HTTP save and RabbitMQ publish are separate operations, so crashes or lost
+publisher confirmations may leave a saved product without a shopping-list
+entry or produce duplicate shopping-list entries on retry. BPD reports uncertain
+publishing rather than silently claiming success.
+
+Queue durability, broker acknowledgement timeouts, and
 quorum-queue delivery limits remain properties of your RabbitMQ deployment.
 Configure its acknowledgement timeout above BPD's claim duration plus the save
-request timeout. Repeatedly returning poison messages may reach a broker delivery
-limit; configure dead-letter handling where needed.
+request timeout and shopping-list publish timeout (5 seconds). Repeatedly
+returning poison messages may reach a broker delivery limit; configure
+dead-letter handling where needed.
 
 `GET /healthz` reports that the HTTP process is running. `GET /readyz` checks
 RabbitMQ queue access and returns `503` if unavailable; it does not probe the

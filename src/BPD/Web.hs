@@ -53,7 +53,8 @@ webApp config desk = do
       checkCsrf csrf
       token <- S.pathParam "id"
       desc <- fromMaybe "" <$> S.formParamMaybe "description"
-      S.liftIO $ saveDescription desk token desc
+      shopping <- (== Just ("on" :: Text)) <$> S.formParamMaybe "addToShoppingList"
+      S.liftIO $ saveDescription desk token desc shopping
       view <- S.liftIO $ snapshot desk
       redirectTo $ case activeClaim view of
         Just c | claimId c == token -> claimUrl token
@@ -153,7 +154,10 @@ edit _config csrf c = page $ do
     Right _ -> form_ [method_ "post", action_ $ claimUrl (claimId c) <> "/save"] $ do
       hiddenCsrf csrf
       label_ [for_ "description"] "Product description"
-      textarea_ [id_ "description", name_ "description", rows_ "4", required_ "", maxlength_ "2000", autofocus_] $ toHtml $ description c
+      textarea_ ([id_ "description", name_ "description", rows_ "4", required_ "", maxlength_ "2000", autofocus_] ++ [readonly_ "" | productSaved c]) $ toHtml $ description c
+      label_ [for_ "add-to-shopping-list"] $ do
+        input_ $ [type_ "checkbox", id_ "add-to-shopping-list", name_ "addToShoppingList", value_ "on"] ++ [checked_ | addToShoppingList c]
+        " Add to shopping list"
       button_ [type_ "submit"] "Save product"
   form_ [method_ "post", action_ $ claimUrl (claimId c) <> "/return"] $ do
     hiddenCsrf csrf

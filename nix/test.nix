@@ -11,7 +11,7 @@ in {
       package = bpd;
       productUrl = "http://127.0.0.1:8003/api/product";
       claimTimeoutSeconds = 8;
-      rabbitmq = { username = "bpd"; passwordFile = "/run/bpd-test-credential"; };
+      rabbitmq = { username = "bpd"; passwordFile = "/run/bpd-test-credential"; shoppingListQueue = "test-shopping-list"; };
     };
     # Test-only credential; production uses a secret managed outside the store.
     systemd.tmpfiles.rules = [ "f /run/bpd-test-credential 0600 root root - test-password" ];

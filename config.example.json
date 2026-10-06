@@ -8,6 +8,7 @@
     "port": 5672,
     "vhost": "/",
     "username": "bpd",
-    "queue": "missing-barcodes"
+    "queue": "missing-barcodes",
+    "shoppingListQueue": "shopping-list"
   }
 }

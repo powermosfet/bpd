@@ -11,7 +11,7 @@ import Network.HTTP.Client (parseRequest, secure, host, method)
 
 data RabbitConfig = RabbitConfig
   { rabbitHost :: String, rabbitPort :: Int, rabbitVHost :: Text
-  , rabbitUser :: Text, rabbitQueue :: Text
+  , rabbitUser :: Text, rabbitQueue :: Text, shoppingListQueue :: Text
   } deriving (Eq, Show)
 
 data Config = Config
@@ -21,13 +21,14 @@ data Config = Config
 
 defaultConfig :: Config
 defaultConfig = Config "127.0.0.1" 8080 "http://mook.local:8003/api/product" 900
-  (RabbitConfig "localhost" 5672 "/" "guest" "missing-barcodes")
+  (RabbitConfig "localhost" 5672 "/" "guest" "missing-barcodes" "shopping-list")
 
 instance FromJSON RabbitConfig where
   parseJSON = withObject "RabbitMQ settings" $ \o -> RabbitConfig
     <$> o .:? "host" .!= rabbitHost r <*> o .:? "port" .!= rabbitPort r
     <*> o .:? "vhost" .!= rabbitVHost r <*> o .:? "username" .!= rabbitUser r
     <*> o .:? "queue" .!= rabbitQueue r
+    <*> o .:? "shoppingListQueue" .!= shoppingListQueue r
     where r = rabbit defaultConfig
 
 instance FromJSON Config where
@@ -45,6 +46,8 @@ validateConfig c
   | claimTimeoutSeconds c < 1 = Left "claimTimeoutSeconds must be positive."
   | null (listenAddress c) || null (rabbitHost (rabbit c)) = Left "Listen address and RabbitMQ host must not be empty."
   | T.null (rabbitQueue (rabbit c)) = Left "RabbitMQ queue must not be empty."
+  | T.null (shoppingListQueue (rabbit c)) = Left "RabbitMQ shoppingListQueue must not be empty."
+  | shoppingListQueue (rabbit c) == rabbitQueue (rabbit c) = Left "RabbitMQ shoppingListQueue must differ from the barcode queue."
   | not ("http://" `T.isPrefixOf` url || "https://" `T.isPrefixOf` url) = Left "productUrl must use http:// or https://."
   | otherwise = Right c
   where url = T.pack (productUrl c)
